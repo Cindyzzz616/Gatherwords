@@ -1,6 +1,8 @@
 import { router } from "expo-router";
+import { SymbolView } from "expo-symbols";
 import { useEffect, useRef } from "react";
 import { Animated, Easing, Pressable, View, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const LONG_PRESS_DURATION = 600;
 
@@ -52,6 +54,7 @@ function ShortcutIcon({ name }: { name: (typeof shortcuts)[number]["icon"] }) {
 }
 
 export default function Index() {
+  const insets = useSafeAreaInsets();
   const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => () => progress.stopAnimation(), [progress]);
@@ -111,6 +114,23 @@ export default function Index() {
         />
       </Pressable>
       </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Open settings"
+        onPress={() => router.push("/settings")}
+        style={({ pressed }) => [
+          styles.settingsButton,
+          { left: insets.left + 16, bottom: insets.bottom + 16 },
+          pressed && styles.settingsPressed,
+        ]}
+      >
+        <SymbolView
+          name={{ ios: "gearshape", android: "settings", web: "settings" }}
+          size={26}
+          tintColor="#262626"
+          style={styles.settingsIcon}
+        />
+      </Pressable>
     </View>
   );
 }
@@ -129,6 +149,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#262626",
     overflow: "hidden",
   },
+  settingsButton: {
+    position: "absolute",
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  settingsPressed: { opacity: 0.5 },
+  settingsIcon: { width: 26, height: 26 },
   buttonGroup: {
     width: 280,
     height: 280,

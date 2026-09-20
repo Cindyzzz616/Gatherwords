@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -19,6 +20,18 @@ export default function AddPage() {
     bottom: string;
   } | null>(null);
   const canSubmit = Boolean(topText.trim() || bottomText.trim());
+  const dismissKeyboardGesture = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gesture) =>
+          Keyboard.isVisible() &&
+          gesture.numberActiveTouches === 1 &&
+          gesture.dy > 40 &&
+          gesture.dy > Math.abs(gesture.dx) * 1.5,
+        onPanResponderGrant: () => Keyboard.dismiss(),
+      }),
+    [],
+  );
 
   function submit() {
     if (!canSubmit) return;
@@ -27,13 +40,14 @@ export default function AddPage() {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["left", "right", "bottom"]}>
+    <SafeAreaView style={styles.container} edges={["top", "left", "right", "bottom"]}>
       <KeyboardAvoidingView
+        {...dismissKeyboardGesture.panHandlers}
         style={styles.container}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
         <TextInput
-          style={styles.input}
+          style={[styles.input, styles.topInput]}
           accessibilityLabel="Top text"
           placeholder="Tap to enter text"
           placeholderTextColor="#8A8A8A"
@@ -97,6 +111,7 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     color: "#262626",
   },
+  topInput: { paddingTop: 56 },
   divider: {
     height: 64,
     flexDirection: "row",

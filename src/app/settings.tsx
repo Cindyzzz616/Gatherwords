@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { onAuthStateChanged, type User } from "firebase/auth";
 
+import { auth } from "@/lib/firebaseAuth";
+import { loadUsername, logInWithEmail, logOut, signInWithGoogle, signUpWithEmail } from "@/lib/account";
 import { ensureUser } from "@/lib/ensureUser";
 import { LANGUAGES, type LanguageCode, type LanguageField, type UserLanguages } from "@/lib/languages";
 import { loadUserLanguages, saveUserLanguages } from "@/lib/userLanguages";
@@ -10,6 +13,141 @@ const GROUPS = [
   { key: "nativeLanguage", label: "I speak..." },
   { key: "targetLanguage", label: "I want to learn..." },
 ] as const;
+
+function AccountSection({
+  onAuthenticated,
+  onSignedOut,
+}: {
+  onAuthenticated: (userId: string) => void;
+  onSignedOut: () => void;
+}) {
+  const [user, setUser] = useState<User | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
+  const [mode, setMode] = useState<"signup" | "login" | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [signupUsername, setSignupUsername] = useState("");
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+      setUser(nextUser);
+      if (nextUser && !nextUser.isAnonymous) {
+        void loadUsername(nextUser.uid).then(setUsername).catch(() => setUsername(null));
+      } else {
+        setUsername(null);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  async function submitEmailAccount() {
+    if (!email.trim() || !password) {
+      setAccountError("Enter your email and password.");
+      return;
+    }
+    if (mode === "signup" && !signupUsername.trim()) {
+      setAccountError("Choose a username to sign up.");
+      return;
+    }
+    setBusy(true);
+    setAccountError(null);
+    try {
+      const nextUser = mode === "signup"
+        ? await signUpWithEmail(email, password, signupUsername)
+        : await logInWithEmail(email, password);
+      if (mode === "login") setUsername(await loadUsername(nextUser.uid));
+      onAuthenticated(nextUser.uid);
+      setMode(null);
+      setEmail("");
+      setPassword("");
+      setSignupUsername("");
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Couldn’t complete authentication.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function useGoogle() {
+    if (mode === "signup" && !signupUsername.trim()) {
+      setAccountError("Choose a username to sign up with Google.");
+      return;
+    }
+    setBusy(true);
+    setAccountError(null);
+    try {
+      const nextUser = await signInWithGoogle(mode === "signup" ? signupUsername : undefined);
+      setUsername(await loadUsername(nextUser.uid));
+      onAuthenticated(nextUser.uid);
+      setMode(null);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Couldn’t complete Google sign-in.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function signOutAccount() {
+    setBusy(true);
+    try {
+      await logOut();
+      onSignedOut();
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Couldn’t log out.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (user && !user.isAnonymous) {
+    return (
+      <View style={styles.accountSection}>
+        <Text style={styles.sectionTitle}>Account</Text>
+        <Text style={styles.username}>{username ?? user.displayName ?? user.email ?? "Signed in"}</Text>
+        <Pressable accessibilityRole="button" disabled={busy} onPress={() => void signOutAccount()} style={styles.secondaryButton}>
+          <Text style={styles.secondaryButtonText}>Log out</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.accountSection}>
+      <Text style={styles.sectionTitle}>Account</Text>
+      {mode === null ? (
+        <View style={styles.accountActions}>
+          <Pressable accessibilityRole="button" onPress={() => setMode("signup")} style={styles.primaryButton}>
+            <Text style={styles.primaryButtonText}>Sign up</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={() => setMode("login")} style={styles.secondaryButton}>
+            <Text style={styles.secondaryButtonText}>Log in</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.form}>
+          <Text style={styles.formTitle}>{mode === "signup" ? "Create an account" : "Log in"}</Text>
+          {mode === "signup" && (
+            <TextInput style={styles.accountInput} placeholder="Username" value={signupUsername} onChangeText={setSignupUsername} autoCapitalize="none" />
+          )}
+          <TextInput style={styles.accountInput} placeholder="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
+          <TextInput style={styles.accountInput} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />
+          <Pressable accessibilityRole="button" disabled={busy} onPress={() => void submitEmailAccount()} style={styles.primaryButton}>
+            <Text style={styles.primaryButtonText}>{mode === "signup" ? "Sign up with email" : "Log in with email"}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" disabled={busy} onPress={() => void useGoogle()} style={styles.googleButton}>
+            <Text style={styles.googleButtonText}>{mode === "signup" ? "Sign up with Google" : "Log in with Google"}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" disabled={busy} onPress={() => { setMode(null); setAccountError(null); }} style={styles.cancelButton}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </Pressable>
+          {accountError && <Text accessibilityRole="alert" style={styles.error}>{accountError}</Text>}
+        </View>
+      )}
+    </View>
+  );
+}
 
 function firebaseErrorMessage(error: unknown) {
   const code = typeof error === "object" && error !== null && "code" in error
@@ -44,6 +182,21 @@ export default function SettingsPage() {
   const [retry, setRetry] = useState(0);
   const writeInProgress = useRef(false);
   const disabled = loading || saving || !userId;
+
+  async function handleAuthenticated(nextUserId: string) {
+    setUserId(nextUserId);
+    try {
+      setSelected(await loadUserLanguages(nextUserId));
+    } catch (loadError) {
+      console.error("Failed to load languages after authentication", loadError);
+      setError(firebaseErrorMessage(loadError));
+    }
+  }
+
+  function handleSignedOut() {
+    setUserId(null);
+    setSelected({ nativeLanguage: [], targetLanguage: [] });
+  }
 
   useEffect(() => {
     let active = true;
@@ -109,7 +262,7 @@ export default function SettingsPage() {
               <Text style={styles.label}>{label}</Text>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Choose languages: ${label}`}
+                accessibilityLabel={`${openMenu === key ? "Close" : "Choose"} languages: ${label}`}
                 accessibilityState={{ expanded: openMenu === key, disabled }}
                 disabled={disabled}
                 onPress={() => setOpenMenu(openMenu === key ? null : key)}
@@ -117,7 +270,7 @@ export default function SettingsPage() {
               >
                 <View pointerEvents="none" style={styles.plus}>
                   <View style={styles.plusHorizontal} />
-                  <View style={styles.plusVertical} />
+                  {openMenu !== key && <View style={styles.plusVertical} />}
                 </View>
               </Pressable>
             </View>
@@ -178,6 +331,10 @@ export default function SettingsPage() {
             )}
           </View>
         ))}
+        <AccountSection
+          onAuthenticated={(nextUserId) => void handleAuthenticated(nextUserId)}
+          onSignedOut={handleSignedOut}
+        />
       </ScrollView>
     </SafeAreaView>
   );
@@ -193,6 +350,21 @@ const styles = StyleSheet.create({
   message: { marginBottom: 16 },
   error: { color: "#B42318", fontSize: 14, lineHeight: 20 },
   retryButton: { alignSelf: "flex-start", paddingVertical: 14, paddingRight: 20 },
+  accountSection: { marginBottom: 44 },
+  sectionTitle: { marginBottom: 12, fontSize: 14, fontWeight: "600", letterSpacing: 1, textTransform: "uppercase", color: "#737373" },
+  username: { marginBottom: 16, fontSize: 24, fontWeight: "600", color: "#262626" },
+  accountActions: { flexDirection: "row", gap: 12 },
+  form: { gap: 12 },
+  formTitle: { marginBottom: 4, fontSize: 22, fontWeight: "500", color: "#262626" },
+  accountInput: { minHeight: 48, paddingHorizontal: 14, borderWidth: 1, borderColor: "#DCDCDC", borderRadius: 12, fontSize: 16, color: "#262626" },
+  primaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 12, backgroundColor: "#262626", alignItems: "center", justifyContent: "center" },
+  primaryButtonText: { fontSize: 15, fontWeight: "600", color: "#FFFFFF" },
+  secondaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 12, borderWidth: 1, borderColor: "#DCDCDC", alignItems: "center", justifyContent: "center" },
+  secondaryButtonText: { fontSize: 15, fontWeight: "600", color: "#262626" },
+  googleButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 12, backgroundColor: "#4285F4", alignItems: "center", justifyContent: "center" },
+  googleButtonText: { fontSize: 15, fontWeight: "600", color: "#FFFFFF" },
+  cancelButton: { alignSelf: "flex-start", paddingVertical: 8 },
+  cancelText: { fontSize: 15, color: "#737373" },
   group: { marginBottom: 32 },
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
   label: { flexShrink: 1, fontSize: 22, fontWeight: "500", color: "#262626" },

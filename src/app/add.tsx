@@ -13,9 +13,20 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ensureUser } from "@/lib/ensureUser";
+import { addUserEncounter } from "@/lib/encounters";
 import { LANGUAGES, type LanguageCode, type LanguageField } from "@/lib/languages";
 import { translateText } from "@/lib/translateText";
 import { loadUserLanguages } from "@/lib/userLanguages";
+
+const LANGUAGE_PLACEHOLDERS: Record<LanguageCode, string> = {
+  en: "Tap to enter text",
+  zh: "点击输入文字",
+  fr: "Appuyez pour saisir du texte",
+  es: "Toca para ingresar texto",
+  pa: "ਲਿਖਣ ਲਈ ਟੈਪ ਕਰੋ",
+  hi: "टेक्स्ट दर्ज करने के लिए टैप करें",
+  ar: "اضغط لإدخال النص",
+};
 
 function LanguageSelector({
   field,
@@ -84,6 +95,8 @@ export default function AddPage() {
   const [openLanguageMenu, setOpenLanguageMenu] = useState<LanguageField | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translationError, setTranslationError] = useState<string | null>(null);
+  const [savingEncounter, setSavingEncounter] = useState(false);
+  const [encounterError, setEncounterError] = useState<string | null>(null);
   const [submission, setSubmission] = useState<{
     top: string;
     bottom: string;
@@ -94,7 +107,7 @@ export default function AddPage() {
   const lastEdited = useRef<"top" | "bottom" | null>(null);
   const topTextRef = useRef("");
   const bottomTextRef = useRef("");
-  const canSubmit = Boolean(topText.trim() || bottomText.trim()) && !translating;
+  const canSubmit = Boolean(topText.trim() || bottomText.trim()) && !translating && !savingEncounter;
   const dismissKeyboardGesture = useMemo(
     () =>
       PanResponder.create({
@@ -201,10 +214,35 @@ export default function AddPage() {
     translationController.current?.abort();
   }, []);
 
-  function submit() {
+  async function submit() {
     if (!canSubmit) return;
-    setSubmission({ top: topText.trim(), bottom: bottomText.trim() });
+
+    const field = lastEdited.current ?? (topText.trim() ? "top" : "bottom");
+    const text = field === "top" ? topText : bottomText;
+    const language = field === "top" ? targetLanguage : nativeLanguage;
+    if (!language) {
+      setEncounterError("Choose a language for this text in Settings first.");
+      return;
+    }
+
+    setSavingEncounter(true);
+    setEncounterError(null);
     Keyboard.dismiss();
+    try {
+      const user = await ensureUser();
+      await addUserEncounter(user.uid, language, text);
+      setSubmission({ top: text.trim(), bottom: "" });
+      setTopText("");
+      setBottomText("");
+      topTextRef.current = "";
+      bottomTextRef.current = "";
+      lastEdited.current = null;
+    } catch (error) {
+      console.error("Failed to save encounter", error);
+      setEncounterError(error instanceof Error ? error.message : "Couldn’t save this encounter.");
+    } finally {
+      setSavingEncounter(false);
+    }
   }
 
   return (
@@ -218,7 +256,7 @@ export default function AddPage() {
           <TextInput
             style={[styles.input, styles.topInput]}
             accessibilityLabel="Top text"
-            placeholder="Tap to enter text"
+            placeholder={targetLanguage ? LANGUAGE_PLACEHOLDERS[targetLanguage] : LANGUAGE_PLACEHOLDERS.en}
             placeholderTextColor="#8A8A8A"
             multiline
             textAlignVertical="top"
@@ -271,12 +309,16 @@ export default function AddPage() {
             <View pointerEvents="none" style={styles.checkmark} />
           </Pressable>
           <View style={styles.line} />
-          {(translating || translationError || submission) && (
+          {(translating || translationError || savingEncounter || encounterError || submission) && (
             <Text
               accessibilityLiveRegion="polite"
-              style={[styles.status, translationError && styles.errorStatus]}
+              style={[styles.status, (translationError || encounterError) && styles.errorStatus]}
             >
-              {translating ? "Translating…" : translationError ?? "Submitted"}
+              {translating
+                ? "Translating…"
+                : savingEncounter
+                  ? "Saving…"
+                  : translationError ?? encounterError ?? "Saved"}
             </Text>
           )}
         </View>
@@ -284,7 +326,7 @@ export default function AddPage() {
           <TextInput
             style={styles.input}
             accessibilityLabel="Bottom text"
-            placeholder="Tap to enter text"
+            placeholder={nativeLanguage ? LANGUAGE_PLACEHOLDERS[nativeLanguage] : LANGUAGE_PLACEHOLDERS.en}
             placeholderTextColor="#8A8A8A"
             multiline
             textAlignVertical="top"

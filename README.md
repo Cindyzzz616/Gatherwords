@@ -1,4 +1,5 @@
 # Welcome to Gatherwords!
+<img src="./assets/images/Gatherwords.png"><img>
 
 ## Inspiration
 - trip to the balkans

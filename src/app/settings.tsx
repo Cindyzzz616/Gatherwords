@@ -1,45 +1,108 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const LANGUAGES = [
-  "English",
-  "French",
-  "Spanish",
-  "Mandarin",
-  "Punjabi",
-  "Hindi",
-  "Arabic",
-] as const;
-
-type Language = (typeof LANGUAGES)[number];
-type LanguageGroup = "speak" | "learn";
+import { ensureUser } from "@/lib/ensureUser";
+import { LANGUAGES, type LanguageCode, type LanguageField, type UserLanguages } from "@/lib/languages";
+import { loadUserLanguages, saveUserLanguages } from "@/lib/userLanguages";
 
 const GROUPS = [
-  { key: "speak", label: "I speak..." },
-  { key: "learn", label: "I want to learn" },
+  { key: "nativeLanguage", label: "I speak..." },
+  { key: "targetLanguage", label: "I want to learn..." },
 ] as const;
 
-export default function SettingsPage() {
-  const [openMenu, setOpenMenu] = useState<LanguageGroup | null>(null);
-  const [selected, setSelected] = useState<Record<LanguageGroup, Language[]>>({
-    speak: [],
-    learn: [],
-  });
+function firebaseErrorMessage(error: unknown) {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : "unknown";
 
-  function toggleLanguage(group: LanguageGroup, language: Language) {
-    setSelected((current) => ({
-      ...current,
-      [group]: current[group].includes(language)
-        ? current[group].filter((item) => item !== language)
-        : [...current[group], language],
-    }));
-    setOpenMenu(null);
+  if (["auth/admin-restricted-operation", "auth/configuration-not-found", "auth/operation-not-allowed"].includes(code)) {
+    return "Anonymous sign-in isn’t enabled. Enable it in Firebase Authentication, then try again.";
+  }
+  if (code === "permission-denied" || code === "firestore/permission-denied") {
+    return "Firestore denied access. Publish the project’s firestore.rules, then try again.";
+  }
+  if (code === "failed-precondition" || code === "firestore/failed-precondition" || code === "not-found") {
+    return "Cloud Firestore isn’t ready. Create the Firestore database, publish its rules, then try again.";
+  }
+  if (code === "auth/network-request-failed" || code === "unavailable" || code === "firestore/unavailable") {
+    return "Firebase couldn’t connect. Check your internet connection, then try again.";
+  }
+  return `Couldn’t load your languages. Firebase error: ${code}.`;
+}
+
+export default function SettingsPage() {
+  const [openMenu, setOpenMenu] = useState<LanguageField | null>(null);
+  const [selected, setSelected] = useState<UserLanguages>({
+    nativeLanguage: [],
+    targetLanguage: [],
+  });
+  const [userId, setUserId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const writeInProgress = useRef(false);
+  const disabled = loading || saving || !userId;
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    setUserId(null);
+    async function load() {
+      try {
+        const user = await ensureUser();
+        if (!active) return;
+        setUserId(user.uid);
+        const languages = await loadUserLanguages(user.uid);
+        if (active) {
+          setSelected(languages);
+        }
+      } catch (loadError) {
+        console.error("Failed to load Firebase languages", loadError);
+        if (active) setError(firebaseErrorMessage(loadError));
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    void load();
+    return () => { active = false; };
+  }, [retry]);
+
+  async function changeLanguages(field: LanguageField, languages: LanguageCode[]) {
+    if (!userId || loading || writeInProgress.current) return;
+    writeInProgress.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      await saveUserLanguages(userId, field, languages);
+      setSelected((current) => ({ ...current, [field]: languages }));
+    } catch (saveError) {
+      console.error("Failed to save Firebase languages", saveError);
+      setError(firebaseErrorMessage(saveError).replace("load", "save"));
+    } finally {
+      writeInProgress.current = false;
+      setSaving(false);
+    }
   }
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
+        {(loading || saving) && (
+          <Text accessibilityLiveRegion="polite" style={styles.status}>
+            {loading ? "Loading languages…" : "Saving…"}
+          </Text>
+        )}
+        {error && (
+          <View style={styles.message}>
+            <Text accessibilityRole="alert" style={styles.error}>{error}</Text>
+            <Pressable accessibilityRole="button" onPress={() => setRetry((value) => value + 1)} style={styles.retryButton}>
+              <Text style={styles.chipText}>Retry</Text>
+            </Pressable>
+          </View>
+        )}
         {GROUPS.map(({ key, label }) => (
           <View key={key} style={styles.group}>
             <View style={styles.row}>
@@ -47,9 +110,10 @@ export default function SettingsPage() {
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`Choose languages: ${label}`}
-                accessibilityState={{ expanded: openMenu === key }}
+                accessibilityState={{ expanded: openMenu === key, disabled }}
+                disabled={disabled}
                 onPress={() => setOpenMenu(openMenu === key ? null : key)}
-                style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}
+                style={({ pressed }) => [styles.addButton, (pressed || disabled) && styles.pressed]}
               >
                 <View pointerEvents="none" style={styles.plus}>
                   <View style={styles.plusHorizontal} />
@@ -59,17 +123,19 @@ export default function SettingsPage() {
             </View>
             {selected[key].length > 0 && (
               <View style={styles.selectedLanguages}>
-                {selected[key].map((language) => (
-                  <View key={language} style={styles.chip}>
-                    <Text style={styles.chipText}>{language}</Text>
+                {LANGUAGES.filter((language) => selected[key].includes(language.code)).map((language) => (
+                  <View key={language.code} style={styles.chip}>
+                    <Text style={styles.chipText}>{language.label}</Text>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel={`Remove ${language} from ${label}`}
-                      onPress={() => setSelected((current) => ({
-                        ...current,
-                        [key]: current[key].filter((item) => item !== language),
-                      }))}
-                      style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
+                      accessibilityLabel={`Remove ${language.label} from ${label}`}
+                      accessibilityState={{ disabled }}
+                      disabled={disabled}
+                      onPress={() => void changeLanguages(
+                        key,
+                        selected[key].filter((code) => code !== language.code),
+                      )}
+                      style={({ pressed }) => [styles.removeButton, (pressed || disabled) && styles.pressed]}
                     >
                       <View pointerEvents="none" style={styles.removeIcon}>
                         <View style={[styles.removeStroke, styles.removeStrokeForward]} />
@@ -83,21 +149,27 @@ export default function SettingsPage() {
             {openMenu === key && (
               <View style={styles.menu}>
                 {LANGUAGES.map((language) => {
-                  const isSelected = selected[key].includes(language);
+                  const isSelected = selected[key].includes(language.code);
                   return (
                     <Pressable
-                      key={language}
+                      key={language.code}
                       accessibilityRole="checkbox"
-                      accessibilityLabel={language}
-                      accessibilityState={{ checked: isSelected }}
-                      onPress={() => toggleLanguage(key, language)}
+                      accessibilityLabel={language.label}
+                      accessibilityState={{ checked: isSelected, disabled }}
+                      disabled={disabled}
+                      onPress={() => {
+                        const nextLanguages = isSelected
+                          ? selected[key].filter((code) => code !== language.code)
+                          : [...selected[key], language.code];
+                        void changeLanguages(key, nextLanguages);
+                      }}
                       style={({ pressed }) => [
                         styles.option,
                         isSelected && styles.selectedOption,
                         pressed && styles.pressedOption,
                       ]}
                     >
-                      <Text style={styles.optionText}>{language}</Text>
+                      <Text style={styles.optionText}>{language.label}</Text>
                       {isSelected && <View style={styles.checkmark} />}
                     </Pressable>
                   );
@@ -117,6 +189,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   content: { paddingHorizontal: 28, paddingTop: 40, paddingBottom: 32 },
+  status: { marginBottom: 16, color: "#737373", fontSize: 14 },
+  message: { marginBottom: 16 },
+  error: { color: "#B42318", fontSize: 14, lineHeight: 20 },
+  retryButton: { alignSelf: "flex-start", paddingVertical: 14, paddingRight: 20 },
   group: { marginBottom: 32 },
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
   label: { flexShrink: 1, fontSize: 22, fontWeight: "500", color: "#262626" },

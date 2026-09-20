@@ -15,8 +15,10 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from firebase_admin import firestore
 from faster_whisper import WhisperModel
 from pydantic import BaseModel
+from practice_api import router as practice_router
 
 app = FastAPI()
+app.include_router(practice_router)
 model = WhisperModel("small", device="cpu", compute_type="int8")
 
 

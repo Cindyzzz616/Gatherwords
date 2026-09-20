@@ -88,3 +88,19 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+# Practice activities
+
+Practice starts with a multiple-choice question based on a randomly selected nonempty encounter in `users/{userId}/encounters`. After that, swipe right or tap Next to randomly choose a multiple-choice question, fill-in-the-blank, or flashcard. Each MCQ has four shuffled choices. The bottom-right question mark reveals the answer; answering also reveals feedback before proceeding. Flashcards reveal on tap, and fill-in-the-blank cards accept a typed answer. No practice results are saved yet.
+
+The Python server calls OpenAI's Responses API with structured output and validates generated activities before returning them. It verifies the app's Firebase ID token and reads encounters only from that user's collection. Anonymous Firebase sessions work too. Encounter text is sent to OpenAI only when an activity is requested.
+
+Add `OPENAI_API_KEY` to your server's `.env` and optionally set `OPENAI_PRACTICE_MODEL` (default `gpt-4.1-mini`). Keep the key server-only. Ensure `GOOGLE_APPLICATION_CREDENTIALS` points to the Firebase service account for this project. Start the existing server from this directory with:
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -m uvicorn server:app --host 0.0.0.0 --port 8000 --env-file .env
+```
+
+The app uses `EXPO_PUBLIC_TRANSCRIPTION_URL` for practice by default, or `EXPO_PUBLIC_PRACTICE_SERVER_URL` for a separate backend. On a phone, use your computer's LAN address and restart Expo after changing the URL. Missing keys, expired sessions, empty encounters, and generation failures display a message and a retry option where applicable.
+
+API reference: [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).

@@ -25,8 +25,13 @@
 - don't nuke your code with astra
 
 ## What's next for Gatherwords
-- add more ways to forage
+- add more ways to forage - e.g. video calls, meetings and lessons
 - more fine grained linguistic analysis
+- multilingual support
+   - code-switching in listen mode
+   - multiple languages in one frame in observe mode
+- buttons to play audio during review - the audio files are already saved, just not accessed
+- multilingual interface - makes more sense for a language learning app
 
 ## Setup instructions
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).

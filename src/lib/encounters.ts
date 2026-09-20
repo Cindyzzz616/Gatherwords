@@ -33,3 +33,19 @@ export async function addListenEncounter(
     text: trimmedText,
   });
 }
+
+export async function addLookEncounter(
+  userId: string,
+  language: LanguageCode,
+  text: string,
+) {
+  const trimmedText = text.trim();
+  if (!trimmedText) return;
+
+  await addDoc(collection(db, "users", userId, "encounters"), {
+    language,
+    source: "look",
+    storagePath: "",
+    text: trimmedText,
+  });
+}

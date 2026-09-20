@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   languageLabel: { minWidth: 48, height: 32, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center" },
   pressedLanguageLabel: { backgroundColor: "#DCDCDC" },
   languageLabelText: { fontSize: 13, fontWeight: "600", letterSpacing: 0.8, color: "#262626" },
-  languageMenu: { width: 180, marginTop: 8, borderWidth: 1, borderColor: "#E5E5E5", borderRadius: 12, backgroundColor: "#FFFFFF", overflow: "hidden", elevation: 4, shadowColor: "#000000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 8 },
+  languageMenu: { position: "absolute", top: 40, right: 0, width: 180, borderWidth: 1, borderColor: "#E5E5E5", borderRadius: 12, backgroundColor: "#FFFFFF", overflow: "hidden", elevation: 4, shadowColor: "#000000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 8 },
   languageOption: { minHeight: 44, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   selectedLanguageOption: { backgroundColor: "#F0F0F0" },
   pressedLanguageOption: { backgroundColor: "#E5E5E5" },

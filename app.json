@@ -33,7 +33,9 @@
           "imageWidth": 76
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      "expo-image-picker",
+      "expo-camera"
     ],
     "experiments": {
       "typedRoutes": true,

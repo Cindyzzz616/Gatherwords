@@ -9,6 +9,7 @@ export default function RootLayout() {
       <Stack.Screen name="settings" options={{ title: "Settings" }} />
       <Stack.Screen name="account" options={{ title: "Account" }} />
       <Stack.Screen name="listen" options={{ title: "Listen" }} />
+      <Stack.Screen name="look" options={{ title: "Look" }} />
     </Stack>
   );
 }

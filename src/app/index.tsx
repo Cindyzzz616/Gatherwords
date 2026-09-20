@@ -87,6 +87,8 @@ export default function Index() {
                 ? () => router.push("/add")
                 : icon === "soundwave"
                   ? () => router.push("/listen")
+                  : icon === "scanner"
+                    ? () => router.push("/look")
                   : undefined
             }
             style={({ pressed }) => [

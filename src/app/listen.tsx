@@ -1,0 +1,258 @@
+import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder, useAudioRecorderState } from "expo-audio";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { File } from "expo-file-system";
+import { SymbolView } from "expo-symbols";
+import { useEffect, useState } from "react";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { ensureUser } from "@/lib/ensureUser";
+import { addListenEncounter } from "@/lib/encounters";
+import { LANGUAGES, type LanguageCode } from "@/lib/languages";
+import { uploadCompressedRecording } from "@/lib/recordings";
+import { loadUserLanguages } from "@/lib/userLanguages";
+
+const TRANSCRIPTION_URL = process.env.EXPO_PUBLIC_TRANSCRIPTION_URL;
+const LISTEN_LANGUAGE_KEY = "listen-language";
+
+export default function ListenPage() {
+  const insets = useSafeAreaInsets();
+  const recorder = useAudioRecorder(RecordingPresets.LOW_QUALITY);
+  const recorderState = useAudioRecorderState(recorder);
+  const [transcript, setTranscript] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const [recordingUri, setRecordingUri] = useState<string | null>(null);
+  const [languageOptions, setLanguageOptions] = useState<LanguageCode[]>(LANGUAGES.map(({ code }) => code));
+  const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>("en");
+  const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
+
+  useEffect(() => {
+    void setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    async function loadListenLanguage() {
+      try {
+        const [storedLanguage, user] = await Promise.all([
+          AsyncStorage.getItem(LISTEN_LANGUAGE_KEY),
+          ensureUser(),
+        ]);
+        const userLanguages = await loadUserLanguages(user.uid);
+        const options = userLanguages.targetLanguage.length
+          ? userLanguages.targetLanguage
+          : LANGUAGES.map(({ code }) => code);
+        const nextLanguage = options.includes(storedLanguage as LanguageCode)
+          ? storedLanguage as LanguageCode
+          : options[0];
+        if (active && nextLanguage) {
+          setLanguageOptions(options);
+          setSelectedLanguage(nextLanguage);
+        }
+      } catch (error) {
+        console.error("Failed to load Listen language", error);
+      }
+    }
+    void loadListenLanguage();
+    return () => { active = false; };
+  }, []);
+
+  async function selectLanguage(language: LanguageCode) {
+    setSelectedLanguage(language);
+    setLanguageMenuOpen(false);
+    await AsyncStorage.setItem(LISTEN_LANGUAGE_KEY, language);
+  }
+
+  async function startRecording() {
+    const permission = await AudioModule.requestRecordingPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Microphone access needed", "Allow microphone access in Settings to record.");
+      return;
+    }
+
+    await recorder.prepareToRecordAsync({ directory: "document" });
+    recorder.record();
+    setTranscript("");
+    setRecordingUri(null);
+  }
+
+  async function stopRecording() {
+    try {
+      await recorder.stop();
+      if (!recorder.uri) throw new Error("The recording file was not created.");
+      setRecordingUri(recorder.uri);
+    } catch (error) {
+      Alert.alert("Could not stop recording", error instanceof Error ? error.message : "Try recording again.");
+    }
+  }
+
+  async function transcribeAndUpload() {
+    if (!recordingUri) return;
+    if (!TRANSCRIPTION_URL) {
+      Alert.alert(
+        "Transcription server not configured",
+        "Add EXPO_PUBLIC_TRANSCRIPTION_URL to .env, then fully restart Expo."
+      );
+      return;
+    }
+    setProcessing(true);
+    try {
+      const formData = new FormData();
+      formData.append("audio", new File(recordingUri));
+      formData.append("language", selectedLanguage);
+
+      const user = await ensureUser();
+      const response = await fetch(`${TRANSCRIPTION_URL}/transcribe`, { method: "POST", body: formData });
+      const result = await response.json() as { text?: string; detail?: string };
+      if (!response.ok || !result.text) {
+        throw new Error(result.detail ?? "Transcription failed.");
+      }
+
+      const text = result.text.trim();
+      const storagePath = await uploadCompressedRecording(user.uid, recordingUri, selectedLanguage);
+      await addListenEncounter(user.uid, selectedLanguage, text, storagePath);
+      setTranscript(text);
+      setRecordingUri(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Try again.";
+      const isNetworkError = /fetch failed|could not connect|network request failed/i.test(message);
+      Alert.alert(
+        "Could not process recording",
+        isNetworkError
+          ? "The app could not reach the transcription server. Start server.py and set EXPO_PUBLIC_TRANSCRIPTION_URL to your computer’s local-network address."
+          : message
+      );
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  const isRecording = recorderState.isRecording;
+  const selectedLanguageName = LANGUAGES.find(({ code }) => code === selectedLanguage)?.label ?? selectedLanguage;
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.content}>
+        <Text style={styles.title}>{isRecording ? "Listening..." : processing ? "Processing..." : recordingUri ? "Ready to transcribe" : ""}</Text>
+        {transcript ? <Text style={styles.transcript}>{transcript}</Text> : null}
+      </View>
+      <View style={[styles.languageSelector, { top: insets.top + 16, right: 20 }]}>
+        {languageMenuOpen && (
+          <View style={styles.languageMenu}>
+            {languageOptions.map((code) => {
+              const language = LANGUAGES.find((item) => item.code === code);
+              const isSelected = code === selectedLanguage;
+              return (
+                <Pressable
+                  key={code}
+                  accessibilityRole="radio"
+                  accessibilityLabel={language?.label ?? code.toUpperCase()}
+                  accessibilityState={{ checked: isSelected }}
+                  onPress={() => void selectLanguage(code)}
+                  style={({ pressed }) => [styles.languageOption, isSelected && styles.selectedLanguageOption, pressed && styles.pressedLanguageOption]}
+                >
+                  <Text style={styles.languageOptionName}>{language?.label ?? code}</Text>
+                  <Text style={styles.languageOptionCode}>{code.toUpperCase()}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Change listening language from ${selectedLanguageName}`}
+          accessibilityState={{ expanded: languageMenuOpen }}
+          onPress={() => setLanguageMenuOpen((open) => !open)}
+          style={({ pressed }) => [styles.languageLabel, pressed && styles.pressedLanguageLabel]}
+        >
+          <Text style={styles.languageLabelText}>{selectedLanguage.toUpperCase()}</Text>
+        </Pressable>
+      </View>
+      <View style={[styles.bottomControls, { bottom: insets.bottom + 24 }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Discard recording and transcript"
+          accessibilityState={{ disabled: isRecording || processing }}
+          disabled={isRecording || processing}
+          onPress={() => { setTranscript(""); setRecordingUri(null); }}
+          style={({ pressed }) => [styles.iconOnlyButton, pressed && styles.iconOnlyPressed]}
+        >
+          <SymbolView name={{ ios: "xmark", android: "close", web: "close" }} size={24} tintColor="#262626" style={styles.controlIcon} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={isRecording ? "Stop recording" : "Start recording"}
+          accessibilityState={{ disabled: processing }}
+          disabled={processing}
+          onPress={() => void (isRecording ? stopRecording() : startRecording())}
+          style={({ pressed }) => [styles.microphoneButton, isRecording && styles.recordingButton, pressed && styles.pressedButton]}
+        >
+          <SymbolView
+            name={{ ios: isRecording ? "stop.fill" : "mic.fill", android: isRecording ? "stop" : "mic", web: isRecording ? "stop" : "mic" }}
+            size={28}
+            tintColor="#FFFFFF"
+            style={styles.microphoneIcon}
+          />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Transcribe and save recording"
+          accessibilityState={{ disabled: !recordingUri || isRecording || processing }}
+          disabled={!recordingUri || isRecording || processing}
+          onPress={() => void transcribeAndUpload()}
+          style={({ pressed }) => [styles.iconOnlyButton, pressed && styles.iconOnlyPressed]}
+        >
+          <SymbolView name={{ ios: "checkmark", android: "check", web: "check" }} size={24} tintColor="#262626" style={styles.controlIcon} />
+        </Pressable>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 48,
+  },
+  title: {
+    color: "#262626",
+    fontSize: 24,
+    fontWeight: "600",
+  },
+  transcript: {
+    color: "#525252",
+    fontSize: 18,
+    lineHeight: 28,
+    marginTop: 28,
+  },
+  microphoneButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "#262626",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recordingButton: { backgroundColor: "#B42318" },
+  microphoneIcon: { width: 28, height: 28 },
+  bottomControls: { position: "absolute", alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 32 },
+  iconOnlyButton: { width: 48, height: 64, alignItems: "center", justifyContent: "center" },
+  iconOnlyPressed: { opacity: 0.5 },
+  controlIcon: { width: 24, height: 24 },
+  pressedButton: { backgroundColor: "#525252", transform: [{ scale: 0.95 }] },
+  languageSelector: { position: "absolute", alignItems: "flex-end" },
+  languageLabel: { minWidth: 48, height: 32, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#F0F0F0", alignItems: "center", justifyContent: "center" },
+  pressedLanguageLabel: { backgroundColor: "#DCDCDC" },
+  languageLabelText: { fontSize: 13, fontWeight: "600", letterSpacing: 0.8, color: "#262626" },
+  languageMenu: { width: 180, marginTop: 8, borderWidth: 1, borderColor: "#E5E5E5", borderRadius: 12, backgroundColor: "#FFFFFF", overflow: "hidden", elevation: 4, shadowColor: "#000000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 8 },
+  languageOption: { minHeight: 44, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  selectedLanguageOption: { backgroundColor: "#F0F0F0" },
+  pressedLanguageOption: { backgroundColor: "#E5E5E5" },
+  languageOptionName: { fontSize: 15, color: "#262626" },
+  languageOptionCode: { fontSize: 12, fontWeight: "600", color: "#737373" },
+});

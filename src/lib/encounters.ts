@@ -16,3 +16,20 @@ export async function addUserEncounter(
     text: trimmedText,
   });
 }
+
+export async function addListenEncounter(
+  userId: string,
+  language: LanguageCode,
+  text: string,
+  storagePath: string,
+) {
+  const trimmedText = text.trim();
+  if (!trimmedText) return;
+
+  await addDoc(collection(db, "users", userId, "encounters"), {
+    language,
+    source: "listen",
+    storagePath,
+    text: trimmedText,
+  });
+}

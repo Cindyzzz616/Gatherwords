@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { onAuthStateChanged, type User } from "firebase/auth";
+import { router } from "expo-router";
+import { SymbolView } from "expo-symbols";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { auth } from "@/lib/firebaseAuth";
 import { loadUsername, logInWithEmail, logOut, signInWithGoogle, signUpWithEmail } from "@/lib/account";
@@ -14,7 +17,7 @@ const GROUPS = [
   { key: "targetLanguage", label: "I want to learn..." },
 ] as const;
 
-function AccountSection({
+export function AccountSection({
   onAuthenticated,
   onSignedOut,
 }: {
@@ -129,10 +132,10 @@ function AccountSection({
         <View style={styles.form}>
           <Text style={styles.formTitle}>{mode === "signup" ? "Create an account" : "Log in"}</Text>
           {mode === "signup" && (
-            <TextInput style={styles.accountInput} placeholder="Username" value={signupUsername} onChangeText={setSignupUsername} autoCapitalize="none" />
+            <TextInput style={styles.accountInput} placeholder="Username" placeholderTextColor="#262626" value={signupUsername} onChangeText={setSignupUsername} autoCapitalize="none" />
           )}
-          <TextInput style={styles.accountInput} placeholder="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
-          <TextInput style={styles.accountInput} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry />
+          <TextInput style={styles.accountInput} placeholder="Email" placeholderTextColor="#262626" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
+          <TextInput style={styles.accountInput} placeholder="Password" placeholderTextColor="#262626" value={password} onChangeText={setPassword} secureTextEntry />
           <Pressable accessibilityRole="button" disabled={busy} onPress={() => void submitEmailAccount()} style={styles.primaryButton}>
             <Text style={styles.primaryButtonText}>{mode === "signup" ? "Sign up with email" : "Log in with email"}</Text>
           </Pressable>
@@ -170,6 +173,7 @@ function firebaseErrorMessage(error: unknown) {
 }
 
 export default function SettingsPage() {
+  const insets = useSafeAreaInsets();
   const [openMenu, setOpenMenu] = useState<LanguageField | null>(null);
   const [selected, setSelected] = useState<UserLanguages>({
     nativeLanguage: [],
@@ -179,24 +183,10 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const writeInProgress = useRef(false);
   const disabled = loading || saving || !userId;
-
-  async function handleAuthenticated(nextUserId: string) {
-    setUserId(nextUserId);
-    try {
-      setSelected(await loadUserLanguages(nextUserId));
-    } catch (loadError) {
-      console.error("Failed to load languages after authentication", loadError);
-      setError(firebaseErrorMessage(loadError));
-    }
-  }
-
-  function handleSignedOut() {
-    setUserId(null);
-    setSelected({ nativeLanguage: [], targetLanguage: [] });
-  }
 
   useEffect(() => {
     let active = true;
@@ -208,6 +198,9 @@ export default function SettingsPage() {
         const user = await ensureUser();
         if (!active) return;
         setUserId(user.uid);
+        if (!user.isAnonymous) {
+          void loadUsername(user.uid).then(setCurrentUsername).catch(() => setCurrentUsername(null));
+        }
         const languages = await loadUserLanguages(user.uid);
         if (active) {
           setSelected(languages);
@@ -222,6 +215,28 @@ export default function SettingsPage() {
     void load();
     return () => { active = false; };
   }, [retry]);
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        setUserId(null);
+        setCurrentUsername(null);
+        setSelected({ nativeLanguage: [], targetLanguage: [] });
+        return;
+      }
+      setUserId(user.uid);
+      if (user.isAnonymous) {
+        setCurrentUsername(null);
+      } else {
+        void loadUsername(user.uid).then(setCurrentUsername).catch(() => setCurrentUsername(null));
+      }
+      setLoading(true);
+      void loadUserLanguages(user.uid)
+        .then(setSelected)
+        .catch((loadError) => setError(firebaseErrorMessage(loadError)))
+        .finally(() => setLoading(false));
+    });
+  }, []);
 
   async function changeLanguages(field: LanguageField, languages: LanguageCode[]) {
     if (!userId || loading || writeInProgress.current) return;
@@ -331,11 +346,23 @@ export default function SettingsPage() {
             )}
           </View>
         ))}
-        <AccountSection
-          onAuthenticated={(nextUserId) => void handleAuthenticated(nextUserId)}
-          onSignedOut={handleSignedOut}
-        />
       </ScrollView>
+      <View style={[styles.accountDock, { left: insets.left + 16, bottom: insets.bottom + 16 }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open account"
+          onPress={() => router.push("/account")}
+          style={({ pressed }) => [styles.accountIconButton, pressed && styles.pressed]}
+        >
+          <SymbolView
+            name={{ ios: "person.crop.circle", android: "account_circle", web: "account_circle" }}
+            size={28}
+            tintColor="#262626"
+            style={styles.accountIcon}
+          />
+        </Pressable>
+        {currentUsername && <Text style={styles.dockUsername}>{currentUsername}</Text>}
+      </View>
     </SafeAreaView>
   );
 }
@@ -351,6 +378,10 @@ const styles = StyleSheet.create({
   error: { color: "#B42318", fontSize: 14, lineHeight: 20 },
   retryButton: { alignSelf: "flex-start", paddingVertical: 14, paddingRight: 20 },
   accountSection: { marginBottom: 44 },
+  accountDock: { position: "absolute", flexDirection: "row", alignItems: "center" },
+  accountIconButton: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
+  accountIcon: { width: 28, height: 28 },
+  dockUsername: { marginLeft: 8, fontSize: 16, fontWeight: "500", color: "#262626" },
   sectionTitle: { marginBottom: 12, fontSize: 14, fontWeight: "600", letterSpacing: 1, textTransform: "uppercase", color: "#737373" },
   username: { marginBottom: 16, fontSize: 24, fontWeight: "600", color: "#262626" },
   accountActions: { flexDirection: "row", gap: 12 },

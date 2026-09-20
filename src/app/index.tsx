@@ -82,7 +82,13 @@ export default function Index() {
             key={icon}
             accessibilityRole="button"
             accessibilityLabel={label}
-            onPress={icon === "plus" ? () => router.push("/add") : undefined}
+            onPress={
+              icon === "plus"
+                ? () => router.push("/add")
+                : icon === "soundwave"
+                  ? () => router.push("/listen")
+                  : undefined
+            }
             style={({ pressed }) => [
               styles.smallButton,
               position,

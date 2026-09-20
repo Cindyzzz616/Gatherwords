@@ -10,6 +10,8 @@ export default function RootLayout() {
       <Stack.Screen name="account" options={{ title: "Account" }} />
       <Stack.Screen name="listen" options={{ title: "Listen" }} />
       <Stack.Screen name="look" options={{ title: "Look" }} />
+      <Stack.Screen name="talk" options={{ title: "Talk" }} />
+      <Stack.Screen name="talk/[contactId]" options={{ title: "Conversation" }} />
     </Stack>
   );
 }

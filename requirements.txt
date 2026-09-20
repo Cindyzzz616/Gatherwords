@@ -1,4 +1,6 @@
 faster-whisper
+certifi
 fastapi
+firebase-admin
 uvicorn[standard]
 python-multipart

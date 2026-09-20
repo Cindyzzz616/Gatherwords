@@ -14,13 +14,16 @@ import { loadUserLanguages } from "@/lib/userLanguages";
 
 const TRANSCRIPTION_URL = process.env.EXPO_PUBLIC_TRANSCRIPTION_URL;
 const LISTEN_LANGUAGE_KEY = "listen-language";
+type ListenPhase = "idle" | "listening" | "transcribing" | "review" | "saving";
 
 export default function ListenPage() {
   const insets = useSafeAreaInsets();
   const recorder = useAudioRecorder(RecordingPresets.LOW_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
   const [transcript, setTranscript] = useState("");
-  const [processing, setProcessing] = useState(false);
+  const [phase, setPhase] = useState<ListenPhase>("idle");
+  const [message, setMessage] = useState("");
+  const [messageKind, setMessageKind] = useState<"error" | "success" | null>(null);
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
   const [languageOptions, setLanguageOptions] = useState<LanguageCode[]>(LANGUAGES.map(({ code }) => code));
   const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>("en");
@@ -72,6 +75,9 @@ export default function ListenPage() {
 
     await recorder.prepareToRecordAsync({ directory: "document" });
     recorder.record();
+    setPhase("listening");
+    setMessage("");
+    setMessageKind(null);
     setTranscript("");
     setRecordingUri(null);
   }
@@ -81,27 +87,29 @@ export default function ListenPage() {
       await recorder.stop();
       if (!recorder.uri) throw new Error("The recording file was not created.");
       setRecordingUri(recorder.uri);
+      await transcribeRecording(recorder.uri);
     } catch (error) {
-      Alert.alert("Could not stop recording", error instanceof Error ? error.message : "Try recording again.");
+      setPhase("idle");
+      setMessage(error instanceof Error ? error.message : "Could not stop recording. Try again.");
+      setMessageKind("error");
     }
   }
 
-  async function transcribeAndUpload() {
-    if (!recordingUri) return;
+  async function transcribeRecording(uri: string) {
     if (!TRANSCRIPTION_URL) {
-      Alert.alert(
-        "Transcription server not configured",
-        "Add EXPO_PUBLIC_TRANSCRIPTION_URL to .env, then fully restart Expo."
-      );
+      setPhase("idle");
+      setMessage("Transcription server not configured. Add EXPO_PUBLIC_TRANSCRIPTION_URL to .env, then fully restart Expo.");
+      setMessageKind("error");
       return;
     }
-    setProcessing(true);
+    setPhase("transcribing");
+    setMessage("");
+    setMessageKind(null);
     try {
       const formData = new FormData();
-      formData.append("audio", new File(recordingUri));
+      formData.append("audio", new File(uri));
       formData.append("language", selectedLanguage);
 
-      const user = await ensureUser();
       const response = await fetch(`${TRANSCRIPTION_URL}/transcribe`, { method: "POST", body: formData });
       const result = await response.json() as { text?: string; detail?: string };
       if (!response.ok || !result.text) {
@@ -109,32 +117,59 @@ export default function ListenPage() {
       }
 
       const text = result.text.trim();
-      const storagePath = await uploadCompressedRecording(user.uid, recordingUri, selectedLanguage);
-      await addListenEncounter(user.uid, selectedLanguage, text, storagePath);
       setTranscript(text);
-      setRecordingUri(null);
+      setPhase("review");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Try again.";
       const isNetworkError = /fetch failed|could not connect|network request failed/i.test(message);
-      Alert.alert(
-        "Could not process recording",
+      setPhase("idle");
+      setMessage(
         isNetworkError
           ? "The app could not reach the transcription server. Start server.py and set EXPO_PUBLIC_TRANSCRIPTION_URL to your computer’s local-network address."
           : message
       );
-    } finally {
-      setProcessing(false);
+      setMessageKind("error");
     }
   }
 
-  const isRecording = recorderState.isRecording;
+  function resetListenPage() {
+    setPhase("idle");
+    setTranscript("");
+    setRecordingUri(null);
+    setMessage("");
+    setMessageKind(null);
+  }
+
+  async function saveReviewedRecording() {
+    if (!recordingUri || !transcript) return;
+    setPhase("saving");
+    setMessage("");
+    setMessageKind(null);
+    try {
+      const user = await ensureUser();
+      const storagePath = await uploadCompressedRecording(user.uid, recordingUri, selectedLanguage);
+      await addListenEncounter(user.uid, selectedLanguage, transcript, storagePath);
+      setPhase("idle");
+      setMessage("Recording and transcription saved.");
+      setMessageKind("success");
+      setTimeout(resetListenPage, 1600);
+    } catch (error) {
+      setPhase("review");
+      setMessage(error instanceof Error ? error.message : "Could not save the recording. Try again or discard it.");
+      setMessageKind("error");
+    }
+  }
+
+  const isRecording = recorderState.isRecording || phase === "listening";
+  const isWorking = phase === "transcribing" || phase === "saving";
   const selectedLanguageName = LANGUAGES.find(({ code }) => code === selectedLanguage)?.label ?? selectedLanguage;
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>{isRecording ? "Listening..." : processing ? "Processing..." : recordingUri ? "Ready to transcribe" : ""}</Text>
+        <Text style={styles.title}>{phase === "listening" ? "Listening..." : phase === "transcribing" ? "Transcribing..." : phase === "saving" ? "Saving..." : ""}</Text>
         {transcript ? <Text style={styles.transcript}>{transcript}</Text> : null}
+        {message ? <Text style={[styles.message, messageKind === "error" ? styles.errorMessage : styles.successMessage]}>{message}</Text> : null}
       </View>
       <View style={[styles.languageSelector, { top: insets.top + 16, right: 20 }]}>
         {languageMenuOpen && (
@@ -172,9 +207,9 @@ export default function ListenPage() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Discard recording and transcript"
-          accessibilityState={{ disabled: isRecording || processing }}
-          disabled={isRecording || processing}
-          onPress={() => { setTranscript(""); setRecordingUri(null); }}
+          accessibilityState={{ disabled: isWorking || (!recordingUri && !transcript && !message) }}
+          disabled={isWorking || (!recordingUri && !transcript && !message)}
+          onPress={resetListenPage}
           style={({ pressed }) => [styles.iconOnlyButton, pressed && styles.iconOnlyPressed]}
         >
           <SymbolView name={{ ios: "xmark", android: "close", web: "close" }} size={24} tintColor="#262626" style={styles.controlIcon} />
@@ -182,8 +217,8 @@ export default function ListenPage() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={isRecording ? "Stop recording" : "Start recording"}
-          accessibilityState={{ disabled: processing }}
-          disabled={processing}
+          accessibilityState={{ disabled: isWorking || phase === "review" }}
+          disabled={isWorking || phase === "review"}
           onPress={() => void (isRecording ? stopRecording() : startRecording())}
           style={({ pressed }) => [styles.microphoneButton, isRecording && styles.recordingButton, pressed && styles.pressedButton]}
         >
@@ -197,9 +232,9 @@ export default function ListenPage() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Transcribe and save recording"
-          accessibilityState={{ disabled: !recordingUri || isRecording || processing }}
-          disabled={!recordingUri || isRecording || processing}
-          onPress={() => void transcribeAndUpload()}
+          accessibilityState={{ disabled: phase !== "review" }}
+          disabled={phase !== "review"}
+          onPress={() => void saveReviewedRecording()}
           style={({ pressed }) => [styles.iconOnlyButton, pressed && styles.iconOnlyPressed]}
         >
           <SymbolView name={{ ios: "checkmark", android: "check", web: "check" }} size={24} tintColor="#262626" style={styles.controlIcon} />
@@ -230,6 +265,9 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     marginTop: 28,
   },
+  message: { fontSize: 16, lineHeight: 24, marginTop: 20 },
+  errorMessage: { color: "#B42318" },
+  successMessage: { color: "#147A3E" },
   microphoneButton: {
     width: 64,
     height: 64,

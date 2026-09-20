@@ -1,5 +1,33 @@
-# Welcome to your Expo app 👋
+# Welcome to Gatherwords!
 
+## Inspiration
+- trip to the balkans
+- visiting friends houses
+- texting mom
+
+## What it does
+- foraging
+- digesting
+
+## How we built it
+- codex
+
+## Challenges we ran into
+- split with team
+
+## Accomplishments that we're proud of
+- seriously started at like 8pm
+
+## What we learned
+- problem before solution
+- would I actually use the app
+- don't nuke your code with astra
+
+## What's next for Gatherwords
+- add more ways to forage
+- more fine grained linguistic analysis
+
+## Setup instructions
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
 ## Get started
@@ -24,23 +52,6 @@ In the output, you'll find options to open the app in a
 - [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-### Local transcription server
-
-The Listen screen sends recordings to the local FastAPI server in `server.py` for transcription. Install the server dependencies and start it so devices on your local network can reach it:
-
-```bash
-python3 -m pip install -r requirements.txt
-python3 -m uvicorn server:app --host 0.0.0.0 --port 8000
-```
-
-Add your computer's local-network IP address to `.env`:
-
-```dotenv
-EXPO_PUBLIC_TRANSCRIPTION_URL=http://192.168.1.10:8000
-```
-
-Replace `192.168.1.10` with your computer's actual LAN IP. Do not use `127.0.0.1` when testing on a phone: it points to the phone itself. After changing `.env`, fully restart Expo. You can confirm the server is available by opening `http://YOUR_LAN_IP:8000/health` from the phone browser while both devices are on the same Wi-Fi network.
 
 ## Get a fresh project
 
